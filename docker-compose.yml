@@ -1,0 +1,54 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: craigslist-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - ./data:/data/csv:ro
+      - ./mongo/mongod.conf:/etc/mongod.conf:ro
+    command: ["bash", "-c", "mkdir -p /var/log/mongodb && mongod --config /etc/mongod.conf"]
+    environment:
+      MONGO_INITDB_DATABASE: craigslist
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: craigslist-metabase
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./metabase-data:/metabase-data
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  jupyter:
+    build: .
+    container_name: craigslist-jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./scripts:/app/scripts
+      - ./notebooks:/app/notebooks
+      - ./data:/app/data:ro
+    environment:
+      MONGO_HOST: mongodb
+      MONGO_PORT: 27017
+      MONGO_DB: craigslist
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
