@@ -1,3 +1,16 @@
+"""
+novine u optimizovaoj verziji
+  1. Indeksi (ensure_indexes): po jedan indeks za svaki query, tako da svaki
+     radi preko indeksa (IXSCAN) umesto da cita svih ~426k dokumenata (COLLSCAN).
+  2. q3 preuredjen: grupisem po proizvodjacu pa tek onda $lookup
+
+Izmerneo pre -> posle:
+  q1  2.31s -> 1.15s   (~2x   - indeks pomaze, ali i dalje mora skoro sve da grupise)
+  q2  1.20s -> 0.069s  (~17x  - indeks, pickup je redak pa se brzo nadje)
+  q3 18.58s -> 1.12s   (~16x  - preuredjenje + indeks)
+  q4  1.36s -> 0.20s   (~7x   - indeks, SUV/kabriolet su redji)
+  q5  1.17s -> 0.097s  (~12x  - indeks, pickup je redak)
+"""
 import os
 import time
 import pymongo
@@ -9,6 +22,18 @@ def get_db(version="v1"):
     client = pymongo.MongoClient(MONGO_HOST, MONGO_PORT)
     db_name = "craigslist" if version == "v1" else "craigslist_v2"
     return client, client[db_name]
+
+def ensure_indexes(db):
+    """Napravi indekse koje queryji koriste. createIndex ionako ne pravi duplikate,
+    pa moze da se zove svaki put bez brige."""
+    listings = db["listings"]
+    listings.create_index([("vehicle.model", 1), ("vehicle.year", 1), ("price", 1)])          # q1
+    listings.create_index([("vehicle.type", 1), ("specs.drive", 1), ("price", 1)])            # q2
+    listings.create_index([("vehicle.manufacturer_ref", 1), ("location.state", 1), ("price", 1)])  # q3
+    listings.create_index([("vehicle.type", 1), ("location.state", 1), ("price", 1)])         # q4
+    listings.create_index([("vehicle.type", 1), ("specs.drive", 1), ("vehicle.model", 1), ("price", 1)])  # q5
+    print("Indexes ensured.")
+
 
 def run_query(db, name, pipeline, collection="listings", limit=20):
     print(f"\n{'='*60}")
@@ -86,13 +111,8 @@ def q3_country_of_origin_dominance(db):
            "price" : {"$gt": 0},
            "location.state" : {"$ne" : None},
        }},
-       {"$lookup" :{
-           "from" : "manufacturers",
-           "localField" : "vehicle.manufacturer_ref",
-           "foreignField" : "_id",
-           "as" : "mfr_info"
-       }},
-       {"$unwind" : "$mfr_info"},
+       # prvo se odredi obala 400k+ dokumenata se smanji na grupe (proizvodjac x obala) pre join
+       # $lookup ide ~120 puta umesto 400k. sum+count umesto avg
        {"$addFields" : {
         "coast" : {"$switch" : {
             "branches" : [
@@ -103,9 +123,22 @@ def q3_country_of_origin_dominance(db):
         }}
     }},
        {"$group": {
-            "_id" : {"country" : "$mfr_info.country", "coast" : "$coast"},
-            "avg_price" : {"$avg" : "$price"},
+            "_id" : {"mfr" : "$vehicle.manufacturer_ref", "coast" : "$coast"},
+            "total_price" : {"$sum" : "$price"},
             "count" : {"$sum" : 1}
+       }},
+       {"$lookup" :{
+           "from" : "manufacturers",
+           "localField" : "_id.mfr",
+           "foreignField" : "_id",
+           "as" : "mfr_info"
+       }},
+       {"$unwind" : "$mfr_info"},
+       # spojim proizvodjace koji su iz iste zemlje
+       {"$group": {
+            "_id" : {"country" : "$mfr_info.country", "coast" : "$_id.coast"},
+            "total_price" : {"$sum" : "$total_price"},
+            "count" : {"$sum" : "$count"}
        }},
        {"$sort" : {"count" : -1}},
        {"$group": {
@@ -113,7 +146,7 @@ def q3_country_of_origin_dominance(db):
            "total_listings" : {"$sum" : "$count"},
            "by_coast" : {"$push" : {
                "coast" : "$_id.coast",
-               "avg_price" : {"$round" : ["$avg_price", 2]},
+               "avg_price" : {"$round" : [{"$divide" : ["$total_price", "$count"]}, 2]},
                "count" : "$count"
            }}
        }},
@@ -194,8 +227,10 @@ def q5_drive_type_premium(db):
 
 def run_all(version="v1"):
     client, db = get_db(version)
-    print(f"\nRunning seller queries on {version} schema...")
+    print(f"\nRunning OPTIMIZED seller queries on {version} schema...")
     print(f"{'='*60}")
+
+    ensure_indexes(db)
 
     results = {}
     for name, func in [
