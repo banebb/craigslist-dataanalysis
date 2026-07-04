@@ -8,7 +8,7 @@ Ovaj dokument prati pet pitanja iz uloge **kupca** (pitanja 6–10 iz [`README.m
 ## Metodologija merenja performansi
 
 - Baza radi u Docker kontejneru **`craigslist-mongodb`**, kolekcija `listings` sadrži 426.880 dokumenata.
-- Sva merenja rađena su preko `db.runCommand({ explain: { aggregate: "listings", pipeline: [...] , cursor: {} }, verbosity: "executionStats" })`. Šablon je u [`console_6.js`](./console_6.js).
+- Sva merenja rađena su preko `db.runCommand({ explain: { aggregate: "listings", pipeline: [...] , cursor: {} }, verbosity: "executionStats" })`. Šablon je u.
 - Kada je bilo potrebno merenje bez optimizacije, indeks je privremeno izostavljen ili je queri pušten sa `hint` koji tera COLLSCAN. Kada je merena optimizovana verzija, koristi se odgovarajući kompozitni indeks (i opcioni `hint`).
 - Ključne metrike koje se prate:
   - **`executionTimeMillis`** — ukupno vreme izvršavanja plana
