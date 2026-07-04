@@ -526,7 +526,6 @@ db.listings.aggregate([ /* isti izmenjen pipeline */ ], {
 
 - Ukupno ubrzanje **originalni queri → optimizovana verzija**: **~1.65×** (2647 → 1607 ms).
 - Bottleneck pre optimizacije bio je dvostruk: (a) COLLSCAN nad celom kolekcijom, (b) skup `$push` + `$filter` + `$first` koji je pravio i pretraživao nizove u memoriji za svaki (model, year) par.
-- Poruka pitanja 9: **indeks nije uvek dovoljan bez redizajna pipeline-a**. Da smo samo dodali indeks bez restrukturiranja, dobili bismo neko ubrzanje, ali bi značajan deo vremena i dalje trošili unutrašnji `$group`-ovi. Kombinacija oba tipa optimizacije je ono što daje najbolji efekat.
 
 ---
 
@@ -604,10 +603,6 @@ db.listings.createIndex({
 ### Analiza / bottleneck
 
 Ubrzanje **~4.47×** (1063 → 238 ms). Plan **nije covered** (`totalDocsExamined = 18.198`) jer projekcija povlači polja van indeksa: `vehicle.manufacturer_ref`, `specs.condition`, `location.state`. Engine ipak radi *fetch* za tih 18.198 dokumenata (pre-filter po `specs.condition` još uvek smanjuje na 10.707).
-
-Predlozi za dalje ubrzanje:
-- Napraviti indeks koji uključuje `specs.condition` odmah nakon equality polja (`title_status`, `transmission`, `condition`) — tako bi se i taj filter primenjivao na indeksu.
-- Ili prihvatiti trenutno stanje kao dovoljno dobro (238 ms), pošto je fetch skup od 18k dokumenata iz vruće kolekcije jeftin.
 
 ---
 
